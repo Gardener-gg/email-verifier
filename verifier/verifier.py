@@ -11,7 +11,7 @@ import smtplib
 import socks
 
 from dns import resolver
-from .socksmtp import SocksSMTP as SMTP
+from socks_smtp import SocksSMTP as SMTP
 
 blocked_keywords = ["spamhaus",
 			"proofpoint",
@@ -54,9 +54,6 @@ def handle_551(response):
 def handle_421(response):
     return "Try again later"
 
-def handle_552_or_451(response):
-    return "Mailbox full"
-
 def handle_450(response):
     return "Mailbox busy"
 
@@ -66,10 +63,8 @@ def handle_other(response):
 handle_error = {
     550: handle_550,
     551: handle_551,
-    552: handle_552_or_451,
     450: handle_450,
     421: handle_421,
-    451: handle_552_or_451,
 }
 
 
@@ -114,7 +109,6 @@ class Verifier:
         Returns a named tuple Address
         """
         name, addr = parseaddr(email)
-        print(name, addr)
         if not addr:
             raise EmailFormatError(f"email does not contain address: {email}")
         try:
@@ -187,7 +181,6 @@ class Verifier:
             return lookup
         
         # look for mx record and create a list of mail exchanges
-        # TODO: handle exceptions
         try:
             mx_record = resolver.query(lookup['address'].domain, 'MX')
             mail_exchangers = [exchange.to_text().split() for exchange in mx_record]
@@ -195,7 +188,6 @@ class Verifier:
         except (resolver.NoAnswer, resolver.NXDOMAIN, resolver.NoNameservers):
             lookup['host_exists'] = False
             return lookup
-
 
         for exchange in mail_exchangers:
             try:
@@ -206,18 +198,18 @@ class Verifier:
                     lookup['catch_all'] = catch_all
                     break
             except SMTPRecepientException as err:
-                # do this depending upon the error code
-                lookup['message'] = handle_error.get(err.code, handle_other)(err.response)
+                if err.code in [552, 441]:
+                    lookup['full_inbox'] = True
+                else:
+                    lookup['message'] = handle_error.get(err.code, handle_other)(err.response)
             except smtplib.SMTPServerDisconnected as err:
                 lookup['message'] = "Internal Error"
             except smtplib.SMTPConnectError as err:
                 lookup['message'] = "Internal Error. Maybe blacklisted"
-            except Exception as err:
-                lookup['message'] = "Some other error occured"
 
         return lookup
     
-if __name__ == "__main__": #don't cover
+if __name__ == "__main__":
     v = Verifier(source_addr='user@example.com')
     email = input('Enter email to verify: ')
     l = v.verify(email)
