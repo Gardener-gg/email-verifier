@@ -43,29 +43,39 @@ class SMTPRecepientException(Exception): # don't cover
         self.code = code
         self.response = response
 
+
+####
+# SMTP RCPT error handlers
+####
 def handle_550(response):
     if any([keyword.encode() in response for keyword in blocked_keywords]):
-        return "Blocked by mail server"
-    return "Mailbox unavailable"
+        return dict(message="Blocked by mail server", deliverable=False, host_exists=True)
+    else:
+        return dict(deliverable=False, host_exists=True)
 
-def handle_551(response):
-    return "Mailbox has moved"
 
-def handle_421(response):
-    return "Try again later"
-
-def handle_450(response):
-    return "Mailbox busy"
-
-def handle_other(response):
-    return "Other Error"
-
+# https://www.greenend.org.uk/rjk/tech/smtpreplies.html#RCPT
+# https://sendgrid.com/blog/smtp-server-response-codes-explained/
+# Most of these errors return a dict that should be merged with 'lookup' afterwards
 handle_error = {
+    # 250 and 251 are not errors
     550: handle_550,
-    551: handle_551,
-    450: handle_450,
-    421: handle_421,
+    551: lambda _: dict(deliverable=False, host_exists=True),
+    552: lambda _: dict(deliverable=True, host_exists=True, full_inbox=True),
+    553: lambda _: dict(deliverable=False, host_exists=True),
+    450: lambda _: dict(deliverable=False, host_exists=True),
+    451: lambda _: dict(deliverable=False, message="Local error processing, try again later."),
+    452: lambda _: dict(deliverable=True, full_inbox=True),
+    # Syntax errors
+    # 500 (command not recognised)
+    # 501 (parameter/argument not recognised)
+    # 503 (bad command sequence)
+    521: lambda _: dict(deliverable=False, host_exists=False),
+    421: lambda _: dict(deliverable=False, host_exists=True, message="Service not available, try again later."),
+    441: lambda _: dict(deliverable=True, full_inbox=True, host_exists=True)
 }
+
+handle_unrecognised = lambda a: dict(message=f"Unrecognised error: {a}", deliverable=False)
 
 
 # create a namedtuple to hold the email address
@@ -198,10 +208,11 @@ class Verifier:
                     lookup['catch_all'] = catch_all
                     break
             except SMTPRecepientException as err:
-                if err.code in [552, 441]:
-                    lookup['full_inbox'] = True
-                else:
-                    lookup['message'] = handle_error.get(err.code, handle_other)(err.response)
+                # Error handlers return a dict that is then merged with 'lookup'
+                kwargs = handle_error.get(err.code, handle_unrecognised)(err.response)
+                # This expression merges the lookup dict with kwargs
+                lookup = {**lookup, **kwargs}
+
             except smtplib.SMTPServerDisconnected as err:
                 lookup['message'] = "Internal Error"
             except smtplib.SMTPConnectError as err:
