@@ -58,12 +58,12 @@ $ python3 verifier.py
 
 ## Dependencies
 
-This project have following external dependencies
+This project have following external dependencies:
 
 - [PySocks](https://github.com/Anorov/PySocks) for SOCKS enabled sockets
 - [dnspython](http://www.dnspython.org/) for DNS lookup
 
 ## Contributions
 
-I you find any bugs, please feel free to open an issue or send a pull request.
+If you find any bugs, please feel free to open an issue or send a pull request.
 
